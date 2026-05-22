@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -27,16 +27,43 @@
         price:     11,  // Цена
     };
 
-    // Tooltip element
-    const tooltip = document.createElement('div');
-    tooltip.style.cssText = [
-        'position:fixed', 'background:#1a1a2e', 'color:#e0e0e0',
-        'border:1px solid #555', 'border-radius:8px', 'padding:10px 14px',
-        'font-size:12px', 'font-family:monospace', 'line-height:1.8',
-        'pointer-events:none', 'z-index:99999', 'display:none',
-        'box-shadow:0 4px 20px rgba(0,0,0,0.6)', 'min-width:230px',
-    ].join(';');
-    document.body.appendChild(tooltip);
+    // Shadow DOM tooltip — isolated from site CSS
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none';
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+        <style>
+            :host { all: initial; }
+            #tip {
+                background: #1a1a2e;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 8px;
+                padding: 10px 14px;
+                font-size: 12px;
+                font-family: monospace;
+                line-height: 1.8;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+                min-width: 230px;
+                display: block;
+            }
+            .row {
+                display: flex;
+                justify-content: space-between;
+                gap: 16px;
+            }
+            .lbl { color: #888; white-space: nowrap; }
+            .val { white-space: nowrap; font-weight: bold; text-align: right; }
+            .sep { border: none; border-top: 1px solid #444; margin: 5px 0; }
+            .green { color: #4caf50; font-size: 14px; }
+            .yellow { color: #ffb300; font-size: 14px; }
+            .red { color: #ef5350; font-size: 14px; }
+            .tax { color: #ef9a9a; }
+        </style>
+        <div id="tip"></div>
+    `;
+    const tooltip = shadow.getElementById('tip');
 
     function parseNum(text, zeroOnDash) {
         if (!text) return zeroOnDash ? 0 : null;
@@ -63,43 +90,36 @@
         return { net, roi, invested, gross, actualPrice, remaining, totalCoupons, nkd };
     }
 
-    function roiColor(roi) {
-        if (roi >= 15) return '#4caf50';
-        if (roi >= 10) return '#ffb300';
-        return '#ef5350';
+    function line(label, value, cls) {
+        return `<div class="row"><span class="lbl">${label}</span><span class="val ${cls||''}">${value}</span></div>`;
     }
 
     function renderTooltip(r) {
-        const c = roiColor(r.roi);
+        const cls = r.roi >= 15 ? 'green' : r.roi >= 10 ? 'yellow' : 'red';
         const tax = r.gross * TAX_RATE;
-        const lines = [
-            ['Вложить (цена + НКД):', fmt(r.invested, 2) + ' ₽',        ''],
-            ['Купонов до погашения:', r.remaining + ' шт',               ''],
-            ['Купонный доход всего:', fmt(r.totalCoupons, 2) + ' ₽',     ''],
-            ['Прибыль до налога:',   fmt(r.gross, 2) + ' ₽',            ''],
-            ['Налог 13%:',          '−' + fmt(tax, 2) + ' ₽',           'color:#ef9a9a'],
-            null,
-            ['Прибыль нетто:',      fmt(r.net, 2) + ' ₽',               `color:${c};font-size:14px;font-weight:bold`],
-            ['ROI от вложенных:',   r.roi.toFixed(2) + '%',              `color:${c};font-size:14px;font-weight:bold`],
-        ];
-        return '<table style="border-collapse:collapse">' +
-            lines.map(l => {
-                if (!l) return `<tr><td colspan="2" style="padding:3px 0"><hr style="border:none;border-top:1px solid #444;margin:0"></td></tr>`;
-                return `<tr>
-                    <td style="color:#888;padding:1px 12px 1px 0;white-space:nowrap">${l[0]}</td>
-                    <td style="text-align:right;white-space:nowrap;${l[2]}">${l[1]}</td>
-                </tr>`;
-            }).join('') +
-        '</table>';
+        return [
+            line('Вложить (цена + НКД):', fmt(r.invested, 2) + ' ₽'),
+            line('Купонов до погашения:', r.remaining + ' шт'),
+            line('Купонный доход всего:', fmt(r.totalCoupons, 2) + ' ₽'),
+            line('Прибыль до налога:',   fmt(r.gross, 2) + ' ₽'),
+            line('Налог 13%:',           '−' + fmt(tax, 2) + ' ₽', 'tax'),
+            '<hr class="sep">',
+            line('Прибыль нетто:',       fmt(r.net, 2) + ' ₽',     cls),
+            line('ROI от вложенных:',    r.roi.toFixed(2) + '%',    cls),
+        ].join('');
     }
 
     function positionTooltip(e) {
-        const m = 16, tw = tooltip.offsetWidth || 250, th = tooltip.offsetHeight || 170;
-        let x = e.clientX + m, y = e.clientY + m;
-        if (x + tw > window.innerWidth  - 8) x = e.clientX - tw - m;
+        const m = 16;
+        const tw = host.offsetWidth  || 250;
+        const th = host.offsetHeight || 170;
+        let x = e.clientX + m;
+        let y = e.clientY + m;
         if (y + th > window.innerHeight - 8) y = e.clientY - th - m;
-        tooltip.style.left = x + 'px';
-        tooltip.style.top  = y + 'px';
+        // always right of cursor — only fall back left if truly no space
+        if (x + tw > window.innerWidth - 8) x = e.clientX - tw - m;
+        host.style.left = x + 'px';
+        host.style.top  = y + 'px';
     }
 
     function attachTooltips(dataTable) {
@@ -110,7 +130,7 @@
         rows.forEach(row => {
             row.addEventListener('mouseenter', e => {
                 const cells = row.querySelectorAll('td');
-                if (cells.length < 12) { tooltip.style.display = 'none'; return; }
+                if (cells.length < 12) { host.style.display = 'none'; return; }
 
                 const years  = parseNum(cells[COL.years]?.textContent, false);
                 const coupon = parseNum(cells[COL.coupon]?.textContent, false);
@@ -119,14 +139,14 @@
                 const price  = parseNum(cells[COL.price]?.textContent, false);
 
                 const result = calcProfit(years, coupon, freq, nkd, price);
-                if (!result) { tooltip.style.display = 'none'; return; }
+                if (!result) { host.style.display = 'none'; return; }
 
                 tooltip.innerHTML = renderTooltip(result);
-                tooltip.style.display = 'block';
+                host.style.display = 'block';
                 positionTooltip(e);
             });
             row.addEventListener('mousemove',  positionTooltip);
-            row.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+            row.addEventListener('mouseleave', () => { host.style.display = 'none'; });
         });
 
         console.log('[BondsCalc] Attached to', rows.length, 'rows');
