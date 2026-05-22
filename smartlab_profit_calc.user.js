@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -131,11 +131,14 @@
         if (dataTable.dataset.bondsCalc) return;
         dataTable.dataset.bondsCalc = '1';
 
+        const leftTable = document.querySelector('table.flex-table__l-table');
+        const leftRows  = leftTable ? Array.from(leftTable.querySelectorAll('tr')) : [];
+
         const rows = dataTable.querySelectorAll('tr');
-        rows.forEach(row => {
+        rows.forEach((row, idx) => {
             const cells = row.querySelectorAll('td');
             if (cells.length >= 12) {
-                // Color row immediately on attach
+                // Color both right and left rows by index
                 const years  = parseNum(cells[COL.years]?.textContent, false);
                 const coupon = parseNum(cells[COL.coupon]?.textContent, false);
                 const freq   = parseNum(cells[COL.frequency]?.textContent, false);
@@ -143,12 +146,15 @@
                 const price  = parseNum(cells[COL.price]?.textContent, false);
                 const result = calcProfit(years, coupon, freq, nkd, price);
                 if (result && !isNaN(result.roiAnnual)) {
+                    let bg;
                     if (result.roiAnnual >= DEPOSIT_NET + 2)
-                        row.style.background = 'rgba(76,175,80,0.12)';
+                        bg = 'rgba(76,175,80,0.18)';
                     else if (result.roiAnnual >= DEPOSIT_NET)
-                        row.style.background = 'rgba(255,179,0,0.12)';
+                        bg = 'rgba(255,179,0,0.18)';
                     else
-                        row.style.background = 'rgba(239,83,80,0.07)';
+                        bg = 'rgba(239,83,80,0.10)';
+                    row.style.background = bg;
+                    if (leftRows[idx]) leftRows[idx].style.background = bg;
                 }
             }
 
