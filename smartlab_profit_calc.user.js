@@ -69,26 +69,28 @@
         return '#ef5350';
     }
 
-    function row(label, value, valueStyle) {
-        return `<div style="display:flex;justify-content:space-between;gap:16px">
-            <span style="color:#888">${label}</span>
-            <b style="${valueStyle || ''}">${value}</b>
-        </div>`;
-    }
-
     function renderTooltip(r) {
         const c = roiColor(r.roi);
         const tax = r.gross * TAX_RATE;
-        return [
-            row('Вложить (цена + НКД):', fmt(r.invested, 2) + ' ₽'),
-            row('Купонов до погашения:', r.remaining + ' шт'),
-            row('Купонный доход итого:', fmt(r.totalCoupons, 2) + ' ₽'),
-            row('Прибыль до налога:', fmt(r.gross, 2) + ' ₽'),
-            row('Налог 13%:', '−' + fmt(tax, 2) + ' ₽', 'color:#ef9a9a'),
-            '<div style="border-top:1px solid #444;margin:6px 0"></div>',
-            row('Прибыль нетто:', fmt(r.net, 2) + ' ₽', `color:${c};font-size:14px`),
-            row('ROI:', r.roi.toFixed(2) + '%', `color:${c};font-size:14px`),
-        ].join('');
+        const lines = [
+            ['Вложить (цена + НКД):', fmt(r.invested, 2) + ' ₽',        ''],
+            ['Купонов до погашения:', r.remaining + ' шт',               ''],
+            ['Купонный доход всего:', fmt(r.totalCoupons, 2) + ' ₽',     ''],
+            ['Прибыль до налога:',   fmt(r.gross, 2) + ' ₽',            ''],
+            ['Налог 13%:',          '−' + fmt(tax, 2) + ' ₽',           'color:#ef9a9a'],
+            null,
+            ['Прибыль нетто:',      fmt(r.net, 2) + ' ₽',               `color:${c};font-size:14px;font-weight:bold`],
+            ['ROI от вложенных:',   r.roi.toFixed(2) + '%',              `color:${c};font-size:14px;font-weight:bold`],
+        ];
+        return '<table style="border-collapse:collapse">' +
+            lines.map(l => {
+                if (!l) return `<tr><td colspan="2" style="padding:3px 0"><hr style="border:none;border-top:1px solid #444;margin:0"></td></tr>`;
+                return `<tr>
+                    <td style="color:#888;padding:1px 12px 1px 0;white-space:nowrap">${l[0]}</td>
+                    <td style="text-align:right;white-space:nowrap;${l[2]}">${l[1]}</td>
+                </tr>`;
+            }).join('') +
+        '</table>';
     }
 
     function positionTooltip(e) {
