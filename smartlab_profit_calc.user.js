@@ -6,6 +6,8 @@
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
 // @match        https://smart-lab.ru/q/bonds/*
+// @updateURL    https://raw.githubusercontent.com/DirectAdvance/smart-lab_bonds/main/smartlab_profit_calc.user.js
+// @downloadURL  https://raw.githubusercontent.com/DirectAdvance/smart-lab_bonds/main/smartlab_profit_calc.user.js
 // @grant        none
 // ==/UserScript==
 
