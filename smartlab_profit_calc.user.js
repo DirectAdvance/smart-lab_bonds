@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -17,49 +17,50 @@
     const NOMINAL = 1000;
     const TAX_RATE = 0.13;
 
-    // Create tooltip element
+    // Fixed column indices in flex-table__r-table (0-based)
+    // Confirmed via DOM inspection: headers in flex-table__r-header-table
+    const COL = {
+        years:     1,   // Лет до погаш.
+        coupon:    7,   // Купон, руб
+        frequency: 8,   // Частота, раз в год
+        nkd:       9,   // НКД, руб  ('-' = 0)
+        price:     11,  // Цена
+    };
+
+    // Tooltip element
     const tooltip = document.createElement('div');
-    tooltip.style.cssText = `
-        position: fixed;
-        background: #1a1a2e;
-        color: #e0e0e0;
-        border: 1px solid #444;
-        border-radius: 8px;
-        padding: 10px 14px;
-        font-size: 13px;
-        font-family: monospace;
-        line-height: 1.7;
-        pointer-events: none;
-        z-index: 99999;
-        display: none;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-        min-width: 220px;
-    `;
+    tooltip.style.cssText = [
+        'position:fixed', 'background:#1a1a2e', 'color:#e0e0e0',
+        'border:1px solid #555', 'border-radius:8px', 'padding:10px 14px',
+        'font-size:12px', 'font-family:monospace', 'line-height:1.8',
+        'pointer-events:none', 'z-index:99999', 'display:none',
+        'box-shadow:0 4px 20px rgba(0,0,0,0.6)', 'min-width:230px',
+    ].join(';');
     document.body.appendChild(tooltip);
 
-    function parseNum(text) {
-        if (!text) return null;
+    function parseNum(text, zeroOnDash) {
+        if (!text) return zeroOnDash ? 0 : null;
         const s = text.trim().replace(',', '.');
-        if (s === '-' || s === '' || s === '—') return null;
+        if (s === '-' || s === '' || s === '—') return zeroOnDash ? 0 : null;
         const n = parseFloat(s);
-        return isNaN(n) ? null : n;
+        return isNaN(n) ? (zeroOnDash ? 0 : null) : n;
     }
 
-    function fmt(n, digits = 0) {
-        return n.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    function fmt(n, d = 0) {
+        return n.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d });
     }
 
     function calcProfit(years, couponRub, frequency, nkd, pricePct) {
-        if ([years, couponRub, frequency, nkd, pricePct].some(v => v === null)) return null;
+        if (years === null || couponRub === null || frequency === null || pricePct === null) return null;
         if (years <= 0 || frequency <= 0 || pricePct <= 0) return null;
-        const actualPrice = pricePct / 100 * NOMINAL;
-        const invested = actualPrice + nkd;
-        const remainingCoupons = Math.round(years * frequency);
-        const totalCouponIncome = couponRub * remainingCoupons;
-        const grossProfit = (NOMINAL - actualPrice) + (totalCouponIncome - nkd);
-        const netProfit = grossProfit * (1 - TAX_RATE);
-        const roi = invested > 0 ? (netProfit / invested * 100) : null;
-        return { netProfit, roi, invested, grossProfit, actualPrice, remainingCoupons, totalCouponIncome };
+        const actualPrice   = pricePct / 100 * NOMINAL;
+        const invested      = actualPrice + nkd;
+        const remaining     = Math.round(years * frequency);
+        const totalCoupons  = couponRub * remaining;
+        const gross         = (NOMINAL - actualPrice) + (totalCoupons - nkd);
+        const net           = gross * (1 - TAX_RATE);
+        const roi           = invested > 0 ? net / invested * 100 : null;
+        return { net, roi, invested, gross, actualPrice, remaining, totalCoupons, nkd };
     }
 
     function roiColor(roi) {
@@ -68,115 +69,77 @@
         return '#ef5350';
     }
 
-    function buildTooltip(r) {
-        const color = roiColor(r.roi);
+    function renderTooltip(r) {
+        const c = roiColor(r.roi);
+        const tax = r.gross * TAX_RATE;
         return `
-<span style="color:#aaa">Вложить (цена + НКД):</span>  <b>${fmt(r.invested, 2)} ₽</b>
-<span style="color:#aaa">Купонов до погашения:</span>   <b>${r.remainingCoupons} шт</b>
-<span style="color:#aaa">Купонный доход всего:</span>   <b>${fmt(r.totalCouponIncome, 2)} ₽</b>
-<span style="color:#aaa">Прибыль до налога:</span>      <b>${fmt(r.grossProfit, 2)} ₽</b>
-<span style="color:#aaa">Налог 13%:</span>              <b style="color:#ef9a9a">-${fmt(r.grossProfit * TAX_RATE, 2)} ₽</b>
-──────────────────────────────
-<span style="color:#aaa">Прибыль нетто:</span>          <b style="color:${color};font-size:14px">${fmt(r.netProfit, 2)} ₽</b>
-<span style="color:#aaa">ROI от вложенных:</span>       <b style="color:${color};font-size:14px">${r.roi.toFixed(2)}%</b>
+<span style="color:#888">Вложить (цена + НКД):</span>  <b>${fmt(r.invested, 2)} ₽</b>
+<span style="color:#888">Купонов до погашения:</span>   <b>${r.remaining} шт</b>
+<span style="color:#888">Купонный доход итого:</span>   <b>${fmt(r.totalCoupons, 2)} ₽</b>
+<span style="color:#888">Прибыль до налога:</span>      <b>${fmt(r.gross, 2)} ₽</b>
+<span style="color:#888">Налог 13%:</span>              <b style="color:#ef9a9a">-${fmt(tax, 2)} ₽</b>
+<span style="color:#555">──────────────────────────────</span>
+<span style="color:#888">Прибыль нетто:</span>  <b style="color:${c};font-size:14px">${fmt(r.net, 2)} ₽</b>
+<span style="color:#888">ROI:</span>            <b style="color:${c};font-size:14px">${r.roi.toFixed(2)}%</b>
         `.trim();
     }
 
-    function detectColumns(headerRow) {
-        const cells = headerRow.querySelectorAll('th, td');
-        const idx = {};
-        cells.forEach((cell, i) => {
-            const t = cell.textContent.toLowerCase().replace(/\s+/g, ' ').trim();
-            if (t.includes('лет до') || t.includes('погаш')) idx.years = i;
-            if (t.includes('купон') && (t.includes('руб') || t.match(/купон,?\s*руб/))) idx.coupon = i;
-            if (t.includes('частота') || t.includes('раз в год')) idx.frequency = i;
-            if (t.includes('нкд')) idx.nkd = i;
-            if (t === 'цена' || t.match(/^цена/)) idx.price = i;
-        });
-        return idx;
-    }
-
-    function isBondsTable(table) {
-        const header = table.querySelector('tr');
-        if (!header) return false;
-        const t = header.textContent.toLowerCase();
-        const hits = ['нкд', 'купон', 'цена', 'доход', 'погаш'].filter(k => t.includes(k));
-        return hits.length >= 3;
-    }
-
-    function attachTooltips(table) {
-        if (table.dataset.tooltipAdded) return;
-
-        const headerRow = table.querySelector('tr');
-        if (!headerRow) return;
-        if (!isBondsTable(table)) return;
-
-        const colIdx = detectColumns(headerRow);
-        const required = ['years', 'coupon', 'frequency', 'nkd', 'price'];
-        if (required.some(k => colIdx[k] === undefined)) {
-            console.log('[BondsCalc] Headers not found:', colIdx, '| Header text:', headerRow.textContent.trim().slice(0, 200));
-            return;
-        }
-
-        table.dataset.tooltipAdded = '1';
-        console.log('[BondsCalc] Attached to table. Columns:', colIdx);
-
-        const rows = table.querySelectorAll('tbody tr, tr:not(:first-child)');
-        rows.forEach(row => {
-            row.style.cursor = 'pointer';
-            row.addEventListener('mouseenter', (e) => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length < 3) return;
-
-                const years     = parseNum(cells[colIdx.years]?.textContent);
-                const couponRub = parseNum(cells[colIdx.coupon]?.textContent);
-                const frequency = parseNum(cells[colIdx.frequency]?.textContent);
-                const nkd       = parseNum(cells[colIdx.nkd]?.textContent);
-                const pricePct  = parseNum(cells[colIdx.price]?.textContent);
-
-                const result = calcProfit(years, couponRub, frequency, nkd, pricePct);
-                if (!result) {
-                    tooltip.style.display = 'none';
-                    return;
-                }
-
-                tooltip.innerHTML = buildTooltip(result);
-                tooltip.style.display = 'block';
-                positionTooltip(e);
-            });
-
-            row.addEventListener('mousemove', positionTooltip);
-            row.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
-        });
-    }
-
     function positionTooltip(e) {
-        const margin = 16;
-        const tw = tooltip.offsetWidth || 240;
-        const th = tooltip.offsetHeight || 160;
-        let x = e.clientX + margin;
-        let y = e.clientY + margin;
-        if (x + tw > window.innerWidth - 10) x = e.clientX - tw - margin;
-        if (y + th > window.innerHeight - 10) y = e.clientY - th - margin;
+        const m = 16, tw = tooltip.offsetWidth || 250, th = tooltip.offsetHeight || 170;
+        let x = e.clientX + m, y = e.clientY + m;
+        if (x + tw > window.innerWidth  - 8) x = e.clientX - tw - m;
+        if (y + th > window.innerHeight - 8) y = e.clientY - th - m;
         tooltip.style.left = x + 'px';
         tooltip.style.top  = y + 'px';
     }
 
-    function tryAttach() {
-        document.querySelectorAll('table').forEach(t => {
-            if (!t.dataset.tooltipAdded) attachTooltips(t);
+    function attachTooltips(dataTable) {
+        if (dataTable.dataset.bondsCalc) return;
+        dataTable.dataset.bondsCalc = '1';
+
+        const rows = dataTable.querySelectorAll('tr');
+        rows.forEach(row => {
+            row.addEventListener('mouseenter', e => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 12) { tooltip.style.display = 'none'; return; }
+
+                const years  = parseNum(cells[COL.years]?.textContent, false);
+                const coupon = parseNum(cells[COL.coupon]?.textContent, false);
+                const freq   = parseNum(cells[COL.frequency]?.textContent, false);
+                const nkd    = parseNum(cells[COL.nkd]?.textContent, true);   // '-' → 0
+                const price  = parseNum(cells[COL.price]?.textContent, false);
+
+                const result = calcProfit(years, coupon, freq, nkd, price);
+                if (!result) { tooltip.style.display = 'none'; return; }
+
+                tooltip.innerHTML = renderTooltip(result);
+                tooltip.style.display = 'block';
+                positionTooltip(e);
+            });
+            row.addEventListener('mousemove',  positionTooltip);
+            row.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
         });
+
+        console.log('[BondsCalc] Attached to', rows.length, 'rows');
     }
 
-    // Debounced observer
+    function tryAttach() {
+        const dataTable = document.querySelector('table.flex-table__r-table');
+        if (dataTable) {
+            attachTooltips(dataTable);
+            return true;
+        }
+        return false;
+    }
+
     let timer;
     const observer = new MutationObserver(() => {
         clearTimeout(timer);
-        timer = setTimeout(tryAttach, 600);
+        timer = setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 600);
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    setTimeout(tryAttach, 1500);
-    setTimeout(tryAttach, 3000);
-    setTimeout(tryAttach, 5000);
+    setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 1500);
+    setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 3000);
+    setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 5000);
 })();
