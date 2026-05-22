@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -87,7 +87,8 @@
         const gross         = (NOMINAL - actualPrice) + (totalCoupons - nkd);
         const net           = gross * (1 - TAX_RATE);
         const roi           = invested > 0 ? net / invested * 100 : null;
-        return { net, roi, invested, gross, actualPrice, remaining, totalCoupons, nkd };
+        const roiAnnual = (Math.pow(1 + net / invested, 1 / years) - 1) * 100;
+        return { net, roi, roiAnnual, invested, gross, actualPrice, remaining, totalCoupons, nkd, years };
     }
 
     function line(label, value, cls) {
@@ -105,7 +106,8 @@
             line('Налог 13%:',           '−' + fmt(tax, 2) + ' ₽', 'tax'),
             '<hr class="sep">',
             line('Прибыль нетто:',       fmt(r.net, 2) + ' ₽',     cls),
-            line('ROI от вложенных:',    r.roi.toFixed(2) + '%',    cls),
+            line('ROI от вложенных:',    r.roi.toFixed(2) + '%',          cls),
+            line('Годовых (сложный %):',  r.roiAnnual.toFixed(2) + '%/год', cls),
         ].join('');
     }
 
