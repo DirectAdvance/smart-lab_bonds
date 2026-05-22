@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.4
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -20,13 +20,13 @@
     const DEPOSIT_NET = KEY_RATE * (1 - TAX_RATE); // ~13.05% — депозит после налога
 
     // Fixed column indices in flex-table__r-table (0-based)
-    // Confirmed via DOM inspection: headers in flex-table__r-header-table
+    // Confirmed via DOM inspection: col 0 = hidden, 1 = Лет до погаш., 7 = Купон руб, 8 = Частота, 9 = НКД, 11 = Цена
     const COL = {
-        years:     1,   // Лет до погаш.
-        coupon:    7,   // Купон, руб
-        frequency: 8,   // Частота, раз в год
-        nkd:       9,   // НКД, руб  ('-' = 0)
-        price:     11,  // Цена
+        years:     1,
+        coupon:    7,
+        frequency: 8,
+        nkd:       9,
+        price:     11,
     };
 
     // Shadow DOM tooltip — isolated from site CSS
@@ -90,7 +90,7 @@
         const gross         = (NOMINAL - actualPrice) + (totalCoupons - nkd);
         const net           = gross * (1 - TAX_RATE);
         const roi           = invested > 0 ? net / invested * 100 : null;
-        const roiAnnual = (Math.pow(1 + net / invested, 1 / years) - 1) * 100;
+        const roiAnnual     = (Math.pow(1 + net / invested, 1 / years) - 1) * 100;
         return { net, roi, roiAnnual, invested, gross, actualPrice, remaining, totalCoupons, nkd, years };
     }
 
@@ -121,77 +121,59 @@
         let x = e.clientX + m;
         let y = e.clientY + m;
         if (y + th > window.innerHeight - 8) y = e.clientY - th - m;
-        // always right of cursor — only fall back left if truly no space
-        if (x + tw > window.innerWidth - 8) x = e.clientX - tw - m;
+        if (x + tw > window.innerWidth - 8)  x = e.clientX - tw - m;
         host.style.left = x + 'px';
         host.style.top  = y + 'px';
     }
 
-    function attachTooltips(dataTable) {
-        if (dataTable.dataset.bondsCalc) return;
-        dataTable.dataset.bondsCalc = '1';
+    function calcFromCells(cells) {
+        return calcProfit(
+            parseNum(cells[COL.years]?.textContent, false),
+            parseNum(cells[COL.coupon]?.textContent, false),
+            parseNum(cells[COL.frequency]?.textContent, false),
+            parseNum(cells[COL.nkd]?.textContent, true),
+            parseNum(cells[COL.price]?.textContent, false)
+        );
+    }
 
+    // Process one right-table row. Mark it with data-bc so we don't re-process
+    // the same DOM node. After React re-render, new <tr> nodes have no data-bc
+    // and will be picked up on the next interval tick.
+    function processRow(row, leftRow) {
+        if (row.dataset.bc) return;
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 12) return;
+        row.dataset.bc = '1';
+
+        const result = calcFromCells(cells);
+        if (result && !isNaN(result.roiAnnual)) {
+            const bg = result.roiAnnual >= DEPOSIT_NET + 2 ? '#c8f0c8'
+                     : result.roiAnnual >= DEPOSIT_NET     ? '#f5eaaa'
+                                                           : '#f0c8c8';
+            row.style.setProperty('background', bg, 'important');
+            if (leftRow) leftRow.style.setProperty('background', bg, 'important');
+        }
+
+        row.addEventListener('mouseenter', e => {
+            const c = row.querySelectorAll('td');
+            if (c.length < 12) { host.style.display = 'none'; return; }
+            const r = calcFromCells(c);
+            if (!r) { host.style.display = 'none'; return; }
+            tooltip.innerHTML = renderTooltip(r);
+            host.style.display = 'block';
+            positionTooltip(e);
+        });
+        row.addEventListener('mousemove',  positionTooltip);
+        row.addEventListener('mouseleave', () => { host.style.display = 'none'; });
+    }
+
+    // Run forever — handles initial load AND React re-renders (filter changes etc.)
+    setInterval(() => {
+        const dataTable = document.querySelector('table.flex-table__r-table');
+        if (!dataTable) return;
         const leftTable = document.querySelector('table.flex-table__l-table');
         const leftRows  = leftTable ? Array.from(leftTable.querySelectorAll('tr')) : [];
+        dataTable.querySelectorAll('tr').forEach((row, idx) => processRow(row, leftRows[idx]));
+    }, 500);
 
-        const rows = dataTable.querySelectorAll('tr');
-        rows.forEach((row, idx) => {
-            const cells = row.querySelectorAll('td');
-            if (cells.length >= 12) {
-                // Color both right and left rows by index
-                const years  = parseNum(cells[COL.years]?.textContent, false);
-                const coupon = parseNum(cells[COL.coupon]?.textContent, false);
-                const freq   = parseNum(cells[COL.frequency]?.textContent, false);
-                const nkd    = parseNum(cells[COL.nkd]?.textContent, true);
-                const price  = parseNum(cells[COL.price]?.textContent, false);
-                const result = calcProfit(years, coupon, freq, nkd, price);
-                if (result && !isNaN(result.roiAnnual)) {
-                    let bg;
-                    if (result.roiAnnual >= DEPOSIT_NET + 2)
-                        bg = '#c8f0c8';   // зелёный
-                    else if (result.roiAnnual >= DEPOSIT_NET)
-                        bg = '#f5eaaa';   // жёлтый
-                    else
-                        bg = '#f0c8c8';   // красный
-                    row.style.setProperty('background', bg, 'important');
-                    if (leftRows[idx]) leftRows[idx].style.setProperty('background', bg, 'important');
-                }
-            }
-
-            row.addEventListener('mouseenter', e => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length < 12) { host.style.display = 'none'; return; }
-                const years  = parseNum(cells[COL.years]?.textContent, false);
-                const coupon = parseNum(cells[COL.coupon]?.textContent, false);
-                const freq   = parseNum(cells[COL.frequency]?.textContent, false);
-                const nkd    = parseNum(cells[COL.nkd]?.textContent, true);
-                const price  = parseNum(cells[COL.price]?.textContent, false);
-                const result = calcProfit(years, coupon, freq, nkd, price);
-                if (!result) { host.style.display = 'none'; return; }
-                tooltip.innerHTML = renderTooltip(result);
-                host.style.display = 'block';
-                positionTooltip(e);
-            });
-            row.addEventListener('mousemove',  positionTooltip);
-            row.addEventListener('mouseleave', () => { host.style.display = 'none'; });
-        });
-
-        console.log('[BondsCalc] Attached to', rows.length, 'rows');
-    }
-
-    function tryAttach() {
-        const dataTable = document.querySelector('table.flex-table__r-table');
-        if (!dataTable) return false;
-        if (dataTable.dataset.bondsCalc) return true;
-        // Wait until rows with data are present (table may exist before AJAX fills it)
-        const dataRows = Array.from(dataTable.querySelectorAll('tr'))
-            .filter(r => r.querySelectorAll('td').length >= 12);
-        if (dataRows.length === 0) return false;
-        attachTooltips(dataTable);
-        return true;
-    }
-
-    // Poll every 500ms until table with data rows is found (max 20s)
-    const poll = setInterval(() => { if (tryAttach()) clearInterval(poll); }, 500);
-    setTimeout(() => clearInterval(poll), 20000);
 })();
