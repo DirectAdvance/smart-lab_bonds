@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      2.2
+// @version      2.3
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -191,14 +191,7 @@
         return true;
     }
 
-    let timer;
-    const observer = new MutationObserver(() => {
-        clearTimeout(timer);
-        timer = setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 600);
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 1500);
-    setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 3000);
-    setTimeout(() => { if (tryAttach()) observer.disconnect(); }, 5000);
+    // Poll every 500ms until table with data rows is found (max 20s)
+    const poll = setInterval(() => { if (tryAttach()) clearInterval(poll); }, 500);
+    setTimeout(() => clearInterval(poll), 20000);
 })();
