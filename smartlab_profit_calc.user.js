@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Smart-Lab Bonds Profit Calculator
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.8
 // @description  Показывает расчёт прибыли при наведении на строку облигации
 // @author       Mi
 // @match        https://smart-lab.ru/q/bonds/
@@ -16,6 +16,8 @@
 
     const NOMINAL = 1000;
     const TAX_RATE = 0.13;
+    const KEY_RATE = 15;  // % ЦБ — обновить вручную при изменении ставки
+    const DEPOSIT_NET = KEY_RATE * (1 - TAX_RATE); // ~13.05% — депозит после налога
 
     // Fixed column indices in flex-table__r-table (0-based)
     // Confirmed via DOM inspection: headers in flex-table__r-header-table
@@ -131,19 +133,35 @@
 
         const rows = dataTable.querySelectorAll('tr');
         rows.forEach(row => {
-            row.addEventListener('mouseenter', e => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length < 12) { host.style.display = 'none'; return; }
-
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 12) {
+                // Color row immediately on attach
                 const years  = parseNum(cells[COL.years]?.textContent, false);
                 const coupon = parseNum(cells[COL.coupon]?.textContent, false);
                 const freq   = parseNum(cells[COL.frequency]?.textContent, false);
-                const nkd    = parseNum(cells[COL.nkd]?.textContent, true);   // '-' → 0
+                const nkd    = parseNum(cells[COL.nkd]?.textContent, true);
                 const price  = parseNum(cells[COL.price]?.textContent, false);
+                const result = calcProfit(years, coupon, freq, nkd, price);
+                if (result && !isNaN(result.roiAnnual)) {
+                    if (result.roiAnnual >= DEPOSIT_NET + 2)
+                        row.style.background = 'rgba(76,175,80,0.12)';
+                    else if (result.roiAnnual >= DEPOSIT_NET)
+                        row.style.background = 'rgba(255,179,0,0.12)';
+                    else
+                        row.style.background = 'rgba(239,83,80,0.07)';
+                }
+            }
 
+            row.addEventListener('mouseenter', e => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 12) { host.style.display = 'none'; return; }
+                const years  = parseNum(cells[COL.years]?.textContent, false);
+                const coupon = parseNum(cells[COL.coupon]?.textContent, false);
+                const freq   = parseNum(cells[COL.frequency]?.textContent, false);
+                const nkd    = parseNum(cells[COL.nkd]?.textContent, true);
+                const price  = parseNum(cells[COL.price]?.textContent, false);
                 const result = calcProfit(years, coupon, freq, nkd, price);
                 if (!result) { host.style.display = 'none'; return; }
-
                 tooltip.innerHTML = renderTooltip(result);
                 host.style.display = 'block';
                 positionTooltip(e);
