@@ -69,19 +69,26 @@
         return '#ef5350';
     }
 
+    function row(label, value, valueStyle) {
+        return `<div style="display:flex;justify-content:space-between;gap:16px">
+            <span style="color:#888">${label}</span>
+            <b style="${valueStyle || ''}">${value}</b>
+        </div>`;
+    }
+
     function renderTooltip(r) {
         const c = roiColor(r.roi);
         const tax = r.gross * TAX_RATE;
-        return `
-<span style="color:#888">Вложить (цена + НКД):</span>  <b>${fmt(r.invested, 2)} ₽</b>
-<span style="color:#888">Купонов до погашения:</span>   <b>${r.remaining} шт</b>
-<span style="color:#888">Купонный доход итого:</span>   <b>${fmt(r.totalCoupons, 2)} ₽</b>
-<span style="color:#888">Прибыль до налога:</span>      <b>${fmt(r.gross, 2)} ₽</b>
-<span style="color:#888">Налог 13%:</span>              <b style="color:#ef9a9a">-${fmt(tax, 2)} ₽</b>
-<span style="color:#555">──────────────────────────────</span>
-<span style="color:#888">Прибыль нетто:</span>  <b style="color:${c};font-size:14px">${fmt(r.net, 2)} ₽</b>
-<span style="color:#888">ROI:</span>            <b style="color:${c};font-size:14px">${r.roi.toFixed(2)}%</b>
-        `.trim();
+        return [
+            row('Вложить (цена + НКД):', fmt(r.invested, 2) + ' ₽'),
+            row('Купонов до погашения:', r.remaining + ' шт'),
+            row('Купонный доход итого:', fmt(r.totalCoupons, 2) + ' ₽'),
+            row('Прибыль до налога:', fmt(r.gross, 2) + ' ₽'),
+            row('Налог 13%:', '−' + fmt(tax, 2) + ' ₽', 'color:#ef9a9a'),
+            '<div style="border-top:1px solid #444;margin:6px 0"></div>',
+            row('Прибыль нетто:', fmt(r.net, 2) + ' ₽', `color:${c};font-size:14px`),
+            row('ROI:', r.roi.toFixed(2) + '%', `color:${c};font-size:14px`),
+        ].join('');
     }
 
     function positionTooltip(e) {
